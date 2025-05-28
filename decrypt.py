@@ -1,6 +1,18 @@
 import math
 import numpy as np
 
+from encrypt import (
+    keyExpansion,
+    XOR2,
+    XOR1, 
+    convertState,
+    printMatrix,
+    fowardSBox,
+    SubByte1D,
+    AddRoundKey,
+    galois_multiply,
+)
+
 inverseSBox = [
     [0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb],
     [0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb],
@@ -20,22 +32,6 @@ inverseSBox = [
     [0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d]
 ]
 
-def printMatrix(matrix):
-    if isinstance(matrix[0], str):
-        print(" ".join(matrix))
-    else:
-        for row in matrix:
-            print(" ".join(row))
-
-def convertState(password):
-    state = []
-    if len(password) == 16:
-        for i in range(16):
-            state.append("{:02X}".format(ord(password[i])))
-    nState = np.array(state)
-    temp = nState.reshape(4,4)
-    return np.transpose(temp)
-
 def InverseRotWord(matrix, column):
     temp = []
     for i in range(len(matrix)):
@@ -44,7 +40,7 @@ def InverseRotWord(matrix, column):
         temp.append(byte)
     return temp  
 
-def InverseSubByte1D(row):
+def InvSubByte1D(row):
     output = []
     for byte in row:
         if isinstance(byte, int):
@@ -59,30 +55,100 @@ def InverseSubByte1D(row):
     return output  
 
 
-def InverseSubByte2D(matrix):
+def InvSubByte2D(matrix):
     temp = []
     for row in matrix:
-        temp.append(InverseSubByte1D(row))
+        temp.append(InvSubByte1D(row))
     return temp
 
 
-def InverseShiftRows(matrix):
-    unshifted = []
+def InvShiftRows(matrix):
+    P0 = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+    P1 = np.array([[0,0,0,1],[1,0,0,0],[0,1,0,0],[0,0,1,0]])
+    P2 = np.array([[0,0,1,0],[0,0,0,1],[1,0,0,0],[0,1,0,0]])
+    P3 = np.array([[0,1,0,0],[0,0,1,0],[0,0,0,1],[1,0,0,0]])
+    permutation_matrices = [P0, P1, P2, P3]
+
+    shifted = []
+    for row in matrix:
+        int_row = [int(hex, 16) for hex in row]
+        shifted.append(int_row)
+    shifted = np.array(shifted)
+
     for i in range(4):
-        unshifted_row = matrix[i][:i] + matrix[i][i:]
-        unshifted.append(unshifted_row)
-    return unshifted
+        shifted[i] = permutation_matrices[i] @ shifted[i] 
+
+    final = []
+    for row in shifted:
+        final.append(["{:02X}".format(val) for val in row])
+    return final
 
 
+def InvMixColumns(matrix):
+    fixed_matrix = [
+        ["0E", "0B", "0D", "09"],
+        ["09", "0E", "0B", "0D"],
+        ["0D", "09", "0E", "0B"],
+        ["0B", "0D", "09", "0E"]
+    ]
+
+    result = []
+    for col in range(4):
+        new_col = []
+        for row in range(4):
+            val = 0
+            for k in range(4):
+                product = galois_multiply(fixed_matrix[row][k], matrix[k][col])
+                val = int(XOR2("{:02X}".format(val), product), 16)
+            new_col.append("{:02X}".format(val))
+        result.append(new_col)
+
+    return np.transpose(result).tolist()
 
 
+def decrypt(ciphertext, password):
+    state = convertState(ciphertext)
+    initialKey = convertState(password)
+    keys = keyExpansion(initialKey)
+
+    for i in range(10, -1, -1):
+        if i == 10:
+            state = AddRoundKey(state, keys[i])
+            state = InvShiftRows(state)
+            state = InvSubByte2D(state)
+        elif i == 0:
+            state = AddRoundKey(state, keys[i])
+        else:
+            state = AddRoundKey(state, keys[i])
+            state = InvMixColumns(state)
+            state = InvShiftRows(state)
+            state = InvSubByte2D(state)
+
+    return state
 
 
-fixed_matrix = [
-    ["02", "03", "01", "01"],
-    ["01", "02", "03", "01"],
-    ["01", "01", "02", "03"],
-    ["03", "01", "01", "02"]
-]
+def hex_to_str(hex_string):
+    return bytes.fromhex(hex_string).decode("latin1")  # latin1 preserves raw byte values
 
-printMatrix(InverseShiftRows(fixed_matrix))
+# Test vector from FIPS-197
+key_hex = "00000000000000000000000000000000"
+plaintext_hex = "0336763e966d92595a567cc9ce537f5e"
+expected_ciphertext_hex = "f34481ec3cc627bacd5dc3fb08f273e6"
+
+# Convert to strings
+key_str = hex_to_str(key_hex)
+plaintext_str = hex_to_str(plaintext_hex)
+
+# Run encryption
+cipher_matrix = decrypt(plaintext_str, key_str)
+
+# Flatten result to a single hex string in column-major order
+def flatten_state(matrix):
+    return ''.join(matrix[row][col] for col in range(4) for row in range(4))
+
+ciphertext = flatten_state(cipher_matrix)
+
+# Show results
+print("Your AES ciphertext:", ciphertext.upper())
+print("Expected ciphertext :", expected_ciphertext_hex.upper())
+print("Match?              :", ciphertext.upper() == expected_ciphertext_hex.upper())

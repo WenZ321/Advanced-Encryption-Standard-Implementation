@@ -2,7 +2,7 @@
 import math
 import numpy as np
 
-
+## Predefined S-Box for AES
 fowardSBox = [
     [0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76],
     [0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0],
@@ -22,6 +22,7 @@ fowardSBox = [
     [0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16]
 ]
 
+## Debugging purposes
 def printMatrix(matrix):
     if isinstance(matrix[0], str):
         print(" ".join(matrix))
@@ -29,10 +30,13 @@ def printMatrix(matrix):
         for row in matrix:
             print(" ".join(row))
 
+## Converts a string password into the 4x4 key state mentioned in the paper
 def convertState(password):
     state = []
     if len(password) == 16:
         for i in range(16):
+            ## Converts each char into its ascii values, and then formats it into a 2-digit hex string by 
+            ## turning the ascii value (base 10) into hex (base 16)
             state.append("{:02X}".format(ord(password[i])))
     nState = np.array(state)
     temp = nState.reshape(4,4)
@@ -40,13 +44,19 @@ def convertState(password):
 
 def rotWord(matrix, column):
     matrix = np.array(matrix)
+    
+    ## Since rotword is a column operation, we need to transpose the matrix to operate on columns easier
     matrix = np.transpose(matrix)
     
     row = []
+    
+    ## Appending the int values of the hex strings in the specified column for matrix multiplication (Cant multiply hex strings)
+    ## The column is 1-indexed in the paper, so we subtract 1 to get the correct index
     for hex in matrix[column - 1]:
         row.append(int(hex, 16))
     row = np.array(row)
     
+    ## Permutation matrix mentioned in the paper
     P_Rot = np.array([
         [0, 1, 0, 0],
         [0, 0, 1, 0],  
@@ -54,19 +64,21 @@ def rotWord(matrix, column):
         [1, 0, 0, 0]
     ])
     
+    ## @ here is just matrix multiplication
     shifted = P_Rot @ row
     final = []
+    
+    ## Reformatting the permuted values back into hex strings for the next operation
     for val in shifted:
         final.append("{:02X}".format(val))
     
     return final
 
-# Used in key generation
+# Used in key generation as well as rounds of encryption
 def SubByte1D(row):
     output = []
     for byte in row:
         # Ensure byte is a 2-digit hex string and formats into 0X[][] like 0XAB
-        # These 2 digit hex strings are base 10 integers converted to base 16
         if isinstance(byte, int):
             hex_byte = "{:02X}".format(byte)
         else:
@@ -74,7 +86,11 @@ def SubByte1D(row):
 
         row_idx = int(hex_byte[0], 16) #Takes the first hex digit like A and converts it to its base 10 integer
         col_idx = int(hex_byte[1], 16) #Takes the second hex digit like B and converts it to its base 10 integer
+        
+        # These ids are basically our indices in the S-Box
         substituteByte = fowardSBox[row_idx][col_idx]
+        
+        # Not needed but just for consistency, we format into uppercase hex
         output.append("{:02X}".format(substituteByte))
     return output  
 
@@ -98,56 +114,64 @@ def ShiftRows(matrix):
     for row in matrix:
         int_row = []
         for hex in row:
+            ## Changing from hex to int just so we can do matrix multiplication 
             int_row.append(int(hex, 16))
         shifted.append(int_row)
     shifted = np.array(shifted)
     
     for i in range(4):
+        ## Applying permutation matrices to each row
         shifted[i] = permutation_matrices[i] @ shifted[i] 
     
     final = []
     for row in shifted:
         hex_row = []
         for val in row:
+            ## Reformatting the int values back into hex strings
             hex_row.append("{:02X}".format(val))
         final.append(hex_row)
     
     return final
 
-# In GF(2^8)
+# Multiply two bytes in GF(2^8) — used in AES (like in MixColumns)
 def galois_multiply(byte1, byte2):
-    a = int(byte1, 16)
-    b = int(byte2, 16)
-    result = 0
+    a = int(byte1, 16)  # Convert hex string to integer 
+    b = int(byte2, 16)  # Couldn't figure out a nice way to do this with binary and hex strings, so we use ints to use built in bit wise operations
+    result = 0  # This will hold the final output
 
-    for i in range(8):
-        if b & 1:
-            result = int(XOR28("{:02X}".format(result), "{:02X}".format(a)), 16)
-        carry = a & 0x80
-        a <<= 1
-        if carry:
-            a = int(XOR28("{:02X}".format(a), "11B"), 16)
-        a &= 0xFF
-        b >>= 1
+    for i in range(8):  # Repeat 8 times (for each bit in b)
+        if b & 1:  # If the last bit of b is 1
+            result = int(XOR1("{:02X}".format(result), "{:02X}".format(a)), 16)  # Add a to result (using XOR)
 
-    return "{:02X}".format(result)
+        carry = a & 0x80  # Check if a starts with a 1 (overflow if we shift)
+        a = a << 1  # Shift a left (multiply by x)
 
-def XOR28(byte1, byte2):
-    # Convert 2-character hex strings to binary
+        if carry:  # If we overflowed (a became 9 bits)
+            a = int(XOR1("{:02X}".format(a), "11B"), 16)  # Reduce with AES polynomial 
+
+        a = a & 0xFF  # Keep only the last 8 bits
+        b = b >> 1  # Move to the next bit of b
+
+    return "{:02X}".format(result)  # Return the result as a 2-digit hex string
+
+
+## XOR for binary values longer than 8 bits
+def XOR1(byte1, byte2):
+    # Turn the hex strings into integers
     a = int(byte1, 16)
     b = int(byte2, 16)
     
-    # Perform bitwise XOR manually
-    result = 0
-    for i in range(8):
-        bit1 = (a >> i) & 1
-        bit2 = (b >> i) & 1
-        xor_bit = (bit1 + bit2) % 2  
-        result |= (xor_bit << i)
+    result = 0  
+    for i in range(8):  # Go through each of the 8 bit positions
+        bit1 = (a >> i) & 1  # Get the i-th bit of a
+        bit2 = (b >> i) & 1  # Get the i-th bit of b
+        xor_bit = (bit1 + bit2) % 2  # XOR the two bits (same as 1 if different, 0 if same)
+        result |= (xor_bit << i)  # Put the result bit back in its correct position
 
-    return "{:02X}".format(result)
+    return "{:02X}".format(result)  # Convert the result back into a 2-digit uppercase hex string
 
-# XOR in GF(2)
+
+# Less complicated XOR (for only 8 bit binatry values). More intuitive for understanding 
 def XOR2(byte1, byte2):
     # Convert hex strings to integers
     a = int(byte1, 16)
@@ -185,7 +209,7 @@ def XOR2(byte1, byte2):
 
 
 def MixColumns(matrix):
-    ## predefined
+    ## Predefined matrix 
     fixed_matrix = [
         ["02", "03", "01", "01"],
         ["01", "02", "03", "01"],
@@ -193,20 +217,21 @@ def MixColumns(matrix):
         ["03", "01", "01", "02"]
     ]
 
-    result = []
+    result = []  
 
-    for col in range(4):
-        new_col = []
-        for row in range(4):
-            val = 0
-            for k in range(4):
+    for col in range(4):  # Go through each column of the input matrix
+        new_col = [] 
+        for row in range(4):  # Go through each row of the fixed matrix
+            val = 0  # Start with 0
+            for k in range(4):  # Galois Multiply and XOR each pair of elements
                 product = galois_multiply(fixed_matrix[row][k], matrix[k][col])
-                val = int(XOR2("{:02X}".format(val), product), 16)
-            new_col.append("{:02X}".format(val))
-        result.append(new_col)
+                val = int(XOR2("{:02X}".format(val), product), 16)  # Accumulate result using XOR
+            new_col.append("{:02X}".format(val))  # Convert to hex and add to new column
+        result.append(new_col)  # Add the new column to the result
 
-    # Transpose back to maintain row-major format
+    # Transpose the result to match the original column-major layout
     return np.transpose(result).tolist()
+
 
 
 def AddRoundKey(matrix, key):
@@ -214,11 +239,13 @@ def AddRoundKey(matrix, key):
     for i in range(len(matrix)):
         row = []
         for j in range(len(matrix[0])):
+            ## Corresponding elements of the matrix and key are XORed together
             row.append(XOR2(matrix[i][j], key[i][j]))
         newMatrix.append(row)
     return newMatrix
 
 def keyExpansion(initialKey):
+    # Round constants used to add variety in each round key (Rcon[i] for round i+1)
     RCON = [
         ["01", "00", "00", "00"],
         ["02", "00", "00", "00"],
@@ -232,36 +259,51 @@ def keyExpansion(initialKey):
         ["36", "00", "00", "00"]
     ]
 
-    # Start with the initial key
-    key_schedule = initialKey.copy()  # 4x4 matrix
+    key_schedule = initialKey.copy()  # Start with the initial 4x4 key matrix
 
-    # Transpose to work with column logic
-    key_schedule_T = np.transpose(key_schedule).tolist()  # each row is a word now
+    # AES stores keys column-wise, so we transpose: each row becomes a word (4 bytes)
+    key_schedule_T = np.transpose(key_schedule).tolist()
 
-    for i in range(4, 4 * (11)):
-        prev_word = key_schedule_T[i - 1]
+    # Generate 44 words total (4 for each of the 11 rounds)
+    for i in range(4, 4 * 11):  # Start from 4 since the first 4 words are from the original key
+        prev_word = key_schedule_T[i - 1]  # Last word in current schedule
 
         if i % 4 == 0:
-            # Temporarily convert back to 4x4 matrix to use rotWord()
+            # Every 4th word: apply key schedule core (RotWord + SubBytes + XOR with Rcon)
+
+            # Grab the last 4 words and format into 4x4 to rotate the last column
             temp_matrix = np.transpose(key_schedule_T[i - 4:i]).tolist()
-            rotated = rotWord(temp_matrix, 4)  # rotate last word (column 4)
+            
+            # Rotate the last column up (e.g., [D4, BF, 5D, 30] → [BF, 5D, 30, D4])
+            rotated = rotWord(temp_matrix, 4)
+
+            # Apply S-box substitution to each byte
             subbed = SubByte1D(rotated)
+
+            # Add the round constant (only affects the first byte)
             rcon = RCON[(i // 4) - 1]
+
+            # XOR subbed word with Rcon to create a temp word
             temp = [XOR2(subbed[j], rcon[j]) for j in range(4)]
         else:
+            # If not a multiple of 4, just use the previous word as-is
             temp = prev_word
 
-        # XOR with word from 4 steps earlier
+        # XOR temp with the word 4 positions earlier to create the new word
         new_word = [XOR2(temp[j], key_schedule_T[i - 4][j]) for j in range(4)]
+
+        # Add the new word to the key schedule
         key_schedule_T.append(new_word)
 
-    # Transpose each set of 4 words back to row-major 4x4 matrices
+    # Group every 4 words into a 4x4 matrix and transpose to match AES column-major layout
     round_keys = []
     for i in range(0, len(key_schedule_T), 4):
         round_matrix = np.transpose(key_schedule_T[i:i+4]).tolist()
         round_keys.append(round_matrix)
 
-    return round_keys
+    return round_keys  # Returns 11 round keys: one for each AES round (0–10)
+
+
 
 
 
