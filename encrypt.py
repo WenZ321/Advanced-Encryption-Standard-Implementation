@@ -155,7 +155,8 @@ def galois_multiply(byte1, byte2):
     return "{:02X}".format(result)  # Return the result as a 2-digit hex string
 
 
-## XOR for binary values longer than 8 bits
+## XOR for binary values longer than 8 bits, I couldn't figure out a nice way to do this with binary and hex strings, 
+# so we use ints to use built in bit wise operations which makes the math easier
 def XOR1(byte1, byte2):
     # Turn the hex strings into integers
     a = int(byte1, 16)
@@ -245,7 +246,7 @@ def AddRoundKey(matrix, key):
     return newMatrix
 
 def keyExpansion(initialKey):
-    # Round constants used to add variety in each round key (Rcon[i] for round i+1)
+    # Predefined RCON
     RCON = [
         ["01", "00", "00", "00"],
         ["02", "00", "00", "00"],
@@ -259,12 +260,12 @@ def keyExpansion(initialKey):
         ["36", "00", "00", "00"]
     ]
 
-    key_schedule = initialKey.copy()  # Start with the initial 4x4 key matrix
+    key_schedule = initialKey.copy()  
 
-    # AES stores keys column-wise, so we transpose: each row becomes a word (4 bytes)
+    # AES stores keys column-wise, so we transpose: each row becomes a word 
     key_schedule_T = np.transpose(key_schedule).tolist()
 
-    # Generate 44 words total (4 for each of the 11 rounds)
+    # Generate 40 words total, first 4 are from the original key
     for i in range(4, 4 * 11):  # Start from 4 since the first 4 words are from the original key
         prev_word = key_schedule_T[i - 1]  # Last word in current schedule
 
@@ -273,12 +274,8 @@ def keyExpansion(initialKey):
 
             # Grab the last 4 words and format into 4x4 to rotate the last column
             temp_matrix = np.transpose(key_schedule_T[i - 4:i]).tolist()
-            
-            # Rotate the last column up (e.g., [D4, BF, 5D, 30] → [BF, 5D, 30, D4])
-            rotated = rotWord(temp_matrix, 4)
-
-            # Apply S-box substitution to each byte
-            subbed = SubByte1D(rotated)
+            rotated = rotWord(temp_matrix, 4) # Rotword
+            subbed = SubByte1D(rotated) # SubBytes
 
             # Add the round constant (only affects the first byte)
             rcon = RCON[(i // 4) - 1]
@@ -343,36 +340,5 @@ def encrypt(message, password):
         else:
             encryptedMessage = mainRounds(encryptedMessage, keys[i]) 
     return encryptedMessage
-
-
-
-def hex_to_str(hex_string):
-    return bytes.fromhex(hex_string).decode("latin1")  # latin1 preserves raw byte values
-
-
-
-# Test vector from FIPS-197
-key_hex = "00000000000000000000000000000000"
-plaintext_hex = "f34481ec3cc627bacd5dc3fb08f273e6"
-expected_ciphertext_hex = "0336763e966d92595a567cc9ce537f5e"
-
-# Convert to strings
-key_str = hex_to_str(key_hex)
-plaintext_str = hex_to_str(plaintext_hex)
-
-# Run encryption
-cipher_matrix = encrypt(plaintext_str, key_str)
-
-# Flatten result to a single hex string in column-major order
-def flatten_state(matrix):
-    return ''.join(matrix[row][col] for col in range(4) for row in range(4))
-
-ciphertext = flatten_state(cipher_matrix)
-
-# Show results
-print("Your AES ciphertext:", ciphertext.upper())
-print("Expected ciphertext :", expected_ciphertext_hex.upper())
-print("Match?              :", ciphertext.upper() == expected_ciphertext_hex.upper())
-
 
 

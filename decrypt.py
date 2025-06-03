@@ -32,13 +32,28 @@ inverseSBox = [
     [0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d]
 ]
 
-def InverseRotWord(matrix, column):
-    temp = []
-    for i in range(len(matrix)):
-        
-        byte = matrix[(i - 1) % len(matrix)][column-1]
-        temp.append(byte)
-    return temp  
+def inverseRotWord(matrix, column):
+    matrix = np.transpose(np.array(matrix))
+    
+    col = matrix[column - 1]
+    row = []
+    for i in range(4):
+        row.append(int(col[i], 16))
+    
+    P_InvRot = np.array([
+        [0, 0, 0, 1],
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0]
+    ])
+    
+    shifted = P_InvRot @ row
+    
+    final = []
+    for i in range(4):
+        final.append("{:02X}".format(shifted[i]))
+    
+    return final
 
 def InvSubByte1D(row):
     output = []
@@ -125,30 +140,3 @@ def decrypt(ciphertext, password):
             state = InvSubByte2D(state)
 
     return state
-
-
-def hex_to_str(hex_string):
-    return bytes.fromhex(hex_string).decode("latin1")  # latin1 preserves raw byte values
-
-# Test vector from FIPS-197
-key_hex = "00000000000000000000000000000000"
-plaintext_hex = "0336763e966d92595a567cc9ce537f5e"
-expected_ciphertext_hex = "f34481ec3cc627bacd5dc3fb08f273e6"
-
-# Convert to strings
-key_str = hex_to_str(key_hex)
-plaintext_str = hex_to_str(plaintext_hex)
-
-# Run encryption
-cipher_matrix = decrypt(plaintext_str, key_str)
-
-# Flatten result to a single hex string in column-major order
-def flatten_state(matrix):
-    return ''.join(matrix[row][col] for col in range(4) for row in range(4))
-
-ciphertext = flatten_state(cipher_matrix)
-
-# Show results
-print("Your AES ciphertext:", ciphertext.upper())
-print("Expected ciphertext :", expected_ciphertext_hex.upper())
-print("Match?              :", ciphertext.upper() == expected_ciphertext_hex.upper())
